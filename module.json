@@ -2,7 +2,7 @@
     "id": "PF2e-KR",
     "title": "Rutz's PF2e 한국어 번역 (v14 호환)",
     "description": "Pathfinder 2e의 공식 및 확장 콘텐츠를 포함한 한국어 번역 모듈입니다. (Rutz's PF2e-KR v1.4.5.5 기반, v14 호환 미러)<br>This is a Korean translation module for Pathfinder 2e, including core and expansion content. Ported from Rutz's PF2e-KR for Foundry VTT v14.",
-    "version": "1.4.5.5-v14.1",
+    "version": "1.4.5.5-v14.2",
     "compatibility": {
         "minimum": "13",
         "verified": "14"
