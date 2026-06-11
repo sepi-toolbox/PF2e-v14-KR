@@ -1,18 +1,22 @@
 {
     "id": "PF2e-KR",
-    "title": "Rutz's PF2e 한국어 번역",
-    "description": "Pathfinder 2e의 공식 및 확장 콘텐츠를 포함한 한국어 번역 모듈입니다.<br>This is a Korean translation module for Pathfinder 2e, including core and expansion content.",
-    "version": "1.4.5.5",
+    "title": "Rutz's PF2e 한국어 번역 (v14 호환)",
+    "description": "Pathfinder 2e의 공식 및 확장 콘텐츠를 포함한 한국어 번역 모듈입니다. (Rutz's PF2e-KR v1.4.5.5 기반, v14 호환 미러)<br>This is a Korean translation module for Pathfinder 2e, including core and expansion content. Ported from Rutz's PF2e-KR for Foundry VTT v14.",
+    "version": "1.4.5.5-v14.1",
     "compatibility": {
-    "minimum": "12",
-    "verified": "13"
+        "minimum": "13",
+        "verified": "14"
     },
 
     "styles": ["pf2e-kr.css"],
-    
+
     "authors": [
     {
         "name": "Rutz (rutz179)"
+    },
+    {
+        "name": "Sepi (v14 호환 포팅)",
+        "url": "https://github.com/sepi-toolbox"
     }
     ],
 
@@ -62,7 +66,7 @@
         "flags": {}
         }
     ],
-    "url": "https://github.com/Rutz179/PF2e-KR",
-    "manifest": "https://github.com/Rutz179/PF2e-KR/releases/latest/download/module.json",
-    "download": "https://github.com/Rutz179/PF2e-KR/releases/latest/download/PF2e-KR.zip"
+    "url": "https://github.com/sepi-toolbox/PF2e-v14-KR",
+    "manifest": "https://raw.githubusercontent.com/sepi-toolbox/PF2e-v14-KR/main/module.json",
+    "download": "https://github.com/sepi-toolbox/PF2e-v14-KR/archive/refs/heads/main.zip"
 }
