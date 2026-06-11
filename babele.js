@@ -1,4 +1,15 @@
-import {CompendiumMapping} from "../babele/script/compendium-mapping.js";
+/**
+ * PF2e-KR Babele 모듈 — Foundry VTT v14 / Babele 2.9.x 호환 포팅
+ *
+ * 원본: Rutz179/PF2e-KR babele.js (v1.4.5.5, v13/Babele 1.x용)
+ *
+ * 주요 v14 호환 변경점:
+ * - internal `CompendiumMapping` import 제거 (Babele 2.8+에서 클래스/경로 변경)
+ *   → PF2e-KR의 mappingEntries는 단순한 key→path 매핑이라 자체 헬퍼로 처리
+ * - 등록 훅 분리: game.settings.register는 "init", babele 등록은 "babele.init"
+ *   (Babele 2.9에서 register/registerConverters는 babele.init 시점 필수)
+ * - game.babele.packs.get() → translatedCompendiumFor() 우선, 폴백 유지
+ */
 
 class Translator {
     static get() {
@@ -8,20 +19,15 @@ class Translator {
         return Translator.instance;
     }
 
-    // Initialize translator
     async initialize() {
-        // Signalize translator is ready
         Hooks.callAll("pf2KO.ready");
-
-        const config = await Promise.all([
-            fetch("modules/PF2e-KR/compendium/config.json")
-                .then((r) => r.json())
-                .catch((_e) => {
-                    console.error("PF2e-KR: config 파일을 찾지 못했습니다.");
-                }),
-        ]);
-
-        this.mappings = config[0]?.mappings ?? {};
+        const config = await fetch("modules/PF2e-KR/compendium/config.json")
+            .then((r) => r.json())
+            .catch((_e) => {
+                console.error("PF2e-KR: config 파일을 찾지 못했습니다.");
+                return null;
+            });
+        this.mappings = config?.mappings ?? {};
     }
 
     constructor() {
@@ -30,61 +36,64 @@ class Translator {
 
     sluggify(label) {
         return label
-        .normalize("NFD")                     // 한글 분리 (선택)
-        .replace(/[\u0300-\u036f]/g, "")      // 발음 기호 제거 (선택)
-        .toLowerCase()
-        .replace(/['’]/g, "")
-        .replace(/[^\p{L}0-9]+/gu, " ")       // 유니코드 문자 유지 (한글 포함)
-        .trim()
-        .replace(/[-\s]+/g, "-");
+            .normalize("NFD")
+            .replace(/[̀-ͯ]/g, "")
+            .toLowerCase()
+            .replace(/['’]/g, "")
+            .replace(/[^\p{L}0-9]+/gu, " ")
+            .trim()
+            .replace(/[-\s]+/g, "-");
     }
 
-    getMapping(mapping, compendium = false) {
-        if (compendium) {
-            return this.mappings[mapping]
-                ? new CompendiumMapping(this.mappings[mapping].entryType, this.mappings[mapping].mappingEntries)
-                : {};
-        }
-        return this.mappings[mapping];
+    getMapping(name) {
+        return this.mappings[name];
     }
 
-    dynamicMerge(sourceObject, translation, mapping) {
-        if (translation) {
-            foundry.utils.mergeObject(sourceObject, mapping.map(sourceObject, translation ?? {}), { overwrite: true });
+    // mappingEntries: { translationKey: sourcePath } — translation 키 값을 target 경로로 매핑
+    applyMappingEntries(translation, mappingEntries) {
+        const result = {};
+        if (!translation || !mappingEntries) return result;
+        for (const [key, path] of Object.entries(mappingEntries)) {
+            if (translation[key] !== undefined) {
+                foundry.utils.setProperty(result, path, translation[key]);
+            }
         }
+        return result;
+    }
+
+    dynamicMerge(sourceObject, translation, mappingDef) {
+        if (!translation || !mappingDef) return sourceObject;
+        const mapped = this.applyMappingEntries(translation, mappingDef.mappingEntries);
+        foundry.utils.mergeObject(sourceObject, mapped, { overwrite: true });
         return sourceObject;
     }
 
-    dynamicObjectListMerge(sourceObjectList, translations, mapping) {
-        if (translations) {
-            const mergedObjectList = {};
-            Object.keys(sourceObjectList).forEach((entry) => {
-                Object.assign(mergedObjectList, {
-                    [entry]: this.dynamicMerge(sourceObjectList[entry], translations[entry], mapping),
-                });
-            });
-        }
+    dynamicObjectListMerge(sourceObjectList, translations, mappingDef) {
+        if (!translations || !mappingDef) return sourceObjectList;
+        Object.keys(sourceObjectList).forEach((entry) => {
+            if (translations[entry]) {
+                this.dynamicMerge(sourceObjectList[entry], translations[entry], mappingDef);
+            }
+        });
+        return sourceObjectList;
     }
 
-    dynamicArrayMerge(sourceArray, translation, mapping) {
-        if(!translation) {
-            return sourceArray;
-        }
-        // Loop through array, merge available objects
-        const mappedObjectArray = [];
+    dynamicArrayMerge(sourceArray, translation, mappingDef) {
+        if (!translation || !mappingDef) return sourceArray;
+        const result = [];
         for (let i = 0; i < sourceArray.length; i++) {
             if (translation[i]) {
-                mappedObjectArray.push(this.dynamicMerge(sourceArray[i], translation[i], mapping));
+                result.push(this.dynamicMerge(sourceArray[i], translation[i], mappingDef));
             } else {
-                mappedObjectArray.push(sourceArray[i]);
+                result.push(sourceArray[i]);
             }
         }
-        return mappedObjectArray;
+        return result;
     }
 
     translateActorItems(data, translation) {
         data.forEach((entry, index, arr) => {
-            let specificTranslation = translation ? translation[entry["_id"]] : undefined;
+            const specificTranslation = translation ? translation[entry["_id"]] : undefined;
             const originalName = entry.name;
             if (entry._stats?.compendiumSource
                 && entry._stats.compendiumSource.startsWith("Compendium")
@@ -95,10 +104,12 @@ class Translator {
                     entry._stats.compendiumSource.indexOf(".") + 1,
                     entry._stats.compendiumSource.lastIndexOf(".Item.")
                 );
-                const originalName = fromUuidSync(entry._stats.compendiumSource, {'strict': false})?.flags?.babele?.originalName;
-                if (originalName) {
-                    entry.name = originalName;
-                    const compendium = game.babele.packs.get(itemCompendium);
+                const compendiumOriginalName = fromUuidSync(entry._stats.compendiumSource, { strict: false })?.flags?.babele?.originalName;
+                if (compendiumOriginalName) {
+                    entry.name = compendiumOriginalName;
+                    // v14: facade 우선, 구 API 폴백
+                    const compendium = game.babele.translatedCompendiumFor?.(itemCompendium)
+                        ?? game.babele.packs?.get?.(itemCompendium);
                     if (compendium) {
                         arr[index] = compendium.translate(entry);
                     }
@@ -106,9 +117,7 @@ class Translator {
             }
 
             if (specificTranslation) {
-                // Merge specific translation into Compendium translation
-                this.dynamicMerge(arr[index], specificTranslation, this.getMapping("item", true))
-                // Add Babele standard translated fields
+                this.dynamicMerge(arr[index], specificTranslation, this.getMapping("item"));
                 foundry.utils.mergeObject(arr[index], {
                     translated: true,
                     hasTranslation: true,
@@ -123,7 +132,6 @@ class Translator {
                 });
             }
 
-            // Add the item slug if not already included
             if (!arr[index].system.slug || arr[index].system.slug === "") {
                 arr[index].system.slug = this.sluggify(originalName);
             }
@@ -133,11 +141,9 @@ class Translator {
     }
 
     translateEquipmentName(data, translation, dataObject) {
-
-            return translation;
-        }
+        return translation;
     }
-
+}
 
 Hooks.once("init", () => {
     game.langKOPf2e = Translator.get();
@@ -151,7 +157,6 @@ Hooks.once("init", () => {
             "ko": "한글만",
             "en": "영어만",
             "ko-en": "한글-영어",
-
         },
         default: "ko-en",
         config: true,
@@ -178,57 +183,55 @@ Hooks.once("init", () => {
         onChange: foundry.utils.debouncedReload
     });
 
-    if (typeof game.babele !== "undefined") {
-        game.babele.register({
-            module: "PF2e-KR",
-            lang: 'ko',
-            dir: "compendium/"+game.settings.get('PF2e-KR', 'name-display')
-        });
-
-        game.babele.registerConverters({
-            "translateActorItems": (data, translation) => {
-                return game.langKOPf2e.translateActorItems(data, translation);
-            },
-            "translateEquipmentName": (data, translation, dataObject) => {
-                return game.langKOPf2e.translateEquipmentName(data, translation, dataObject);
-            },
-            "translateHeightening": (data, translation) => {
-                  if (!translation) return data;
-
-                      // translation.heightening이 없으면 기본 설명만 반환
-                      if (!translation.heightening) {
-                          return data;
-                      }
-
-                return game.langKOPf2e.dynamicObjectListMerge(
-                  data, 
-                  translation, 
-                  game.langKOPf2e.getMapping("heightening", true)
-                );
-            },
-            "translateSpellVariant": (data, translation) => {
-                  if (!translation) return data;
-                return game.langKOPf2e.dynamicObjectListMerge(data, translation, game.langKOPf2e.getMapping("item", true));
-            },
-            "translateRules": (data, translation) => {
-                  if (!translation) return data;
-                return game.langKOPf2e.dynamicArrayMerge(data, translation, game.langKOPf2e.getMapping("rules", true));
-            },
-            "translateSkillVariants": (data, translation) => {
-                  if (!translation) return data;
-                return game.langKOPf2e.dynamicObjectListMerge(data, translation, game.langKOPf2e.getMapping("skillSpecial", true));
-            }
-        });
-    }
-
     hookOnAutoAnimations();
+});
+
+// v14 Babele 2.9: 등록은 babele.init 시점 (init 이후)
+Hooks.once("babele.init", () => {
+    if (typeof game.babele === "undefined") return;
+
+    game.babele.register({
+        module: "PF2e-KR",
+        lang: "ko",
+        dir: "compendium/" + game.settings.get("PF2e-KR", "name-display")
+    });
+
+    game.babele.registerConverters({
+        "translateActorItems": (data, translation) => {
+            return game.langKOPf2e.translateActorItems(data, translation);
+        },
+        "translateEquipmentName": (data, translation, dataObject) => {
+            return game.langKOPf2e.translateEquipmentName(data, translation, dataObject);
+        },
+        "translateHeightening": (data, translation) => {
+            if (!translation) return data;
+            if (!translation.heightening) return data;
+            return game.langKOPf2e.dynamicObjectListMerge(
+                data,
+                translation,
+                game.langKOPf2e.getMapping("heightening")
+            );
+        },
+        "translateSpellVariant": (data, translation) => {
+            if (!translation) return data;
+            return game.langKOPf2e.dynamicObjectListMerge(data, translation, game.langKOPf2e.getMapping("item"));
+        },
+        "translateRules": (data, translation) => {
+            if (!translation) return data;
+            return game.langKOPf2e.dynamicArrayMerge(data, translation, game.langKOPf2e.getMapping("rules"));
+        },
+        "translateSkillVariants": (data, translation) => {
+            if (!translation) return data;
+            return game.langKOPf2e.dynamicObjectListMerge(data, translation, game.langKOPf2e.getMapping("skillSpecial"));
+        }
+    });
 });
 
 Hooks.once("babele.ready", () => {
     game.pf2e.ConditionManager.initialize();
 
-    if (game.modules.get("lang-fr-pf2e")?.active){
-        ui.notifications.error("Le package \"Système PF2 Français\" est encore installé sur cette partie ; il n'est plus utile et peut donc être désinstallé.")
+    if (game.modules.get("lang-fr-pf2e")?.active) {
+        ui.notifications.error("Le package \"Système PF2 Français\" est encore installé sur cette partie ; il n'est plus utile et peut donc être désinstallé.");
     }
 });
 
@@ -236,7 +239,7 @@ Hooks.once("babele.ready", () => {
  * Credits to n1xx1 for suggesting this compatibility script for translated items
  */
 function hookOnAutoAnimations() {
-    if (!game.modules.has("autoanimations") || game.settings.get('PF2e-KR', 'deactivate-animations-mapping')) {
+    if (!game.modules.has("autoanimations") || game.settings.get("PF2e-KR", "deactivate-animations-mapping")) {
         return;
     }
 
